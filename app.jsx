@@ -672,36 +672,68 @@ function App() {
     }, claimed !== null ? 700 : 240);
   }, [board, dice, startTurn]);
 
-  // Kick off ONNX session loading on mount so the first AI turn isn't
-  // blocked behind a fresh download.
+  // Spin up a single Web Worker for UCB1 rollouts and reuse it across
+  // turns. Outstanding requests live in a Map keyed by reqId so a
+  // late-arriving reply (e.g. for a turn that was abandoned because
+  // the user hit "New game") can be silently dropped.
+  const ucb1WorkerRef = useRef(null);
+  const ucb1PendingRef = useRef(new Map());
+  const ucb1ReqIdRef = useRef(0);
   useEffect(() => {
-    if (typeof window.loadPolicy === 'function') {
-      window.loadPolicy().catch((e) => console.error('policy load failed', e));
-    }
+    const w = new Worker('ucb1-worker.js');
+    w.onmessage = (e) => {
+      const { reqId, move, stats } = e.data;
+      const resolver = ucb1PendingRef.current.get(reqId);
+      if (resolver) {
+        ucb1PendingRef.current.delete(reqId);
+        resolver({ move, stats });
+      }
+    };
+    w.onerror = (e) => console.error('ucb1 worker error', e.message || e);
+    ucb1WorkerRef.current = w;
+    return () => {
+      w.terminate();
+      ucb1WorkerRef.current = null;
+      ucb1PendingRef.current.clear();
+    };
   }, []);
 
-  // AI turn handler — uses the ONNX-trained policy when available, with a
-  // graceful fallback to the heuristic AI if loading or inference fails.
+  const askUcb1 = useCallback((board, dice, player, budget) => {
+    return new Promise((resolve) => {
+      const w = ucb1WorkerRef.current;
+      if (!w) { resolve({ move: null, stats: null }); return; }
+      const reqId = ++ucb1ReqIdRef.current;
+      ucb1PendingRef.current.set(reqId, resolve);
+      w.postMessage({ type: 'choose', board, dice, player, budget, reqId });
+    });
+  }, []);
+
+  // AI turn handler — UCB1-at-root, run in a Web Worker so the rollout
+  // budget doesn't block dice flicker / animation on the main thread.
+  // Fallback to the heuristic AI if the worker is unavailable.
   useEffect(() => {
     if (phase !== 'ai-thinking') return;
     let cancelled = false;
     aiTimer.current = setTimeout(async () => {
       try {
-        let move = null;
-        if (typeof window.policyChooseMove === 'function') {
-          move = await window.policyChooseMove(board, dice, 'O');
-        }
-        if (!move) move = S3.chooseAIMove(board, dice, 'O');
-        if (cancelled || !move) return;
-        playMove(move, 'O');
+        const { move } = await askUcb1(board, dice, 'O', /* budget */ 2000);
+        if (cancelled) return;
+        // The worker returns {sub, cell}; reconstruct the GUI's full
+        // move record (with `kind`) by looking it up in legalMoves.
+        const legal = S3.legalMoves(board, dice, 'O');
+        let chosen = move
+          ? legal.find(m => m.sub === move.sub && m.cell === move.cell)
+          : null;
+        if (!chosen) chosen = S3.chooseAIMove(board, dice, 'O');
+        if (chosen) playMove(chosen, 'O');
       } catch (e) {
-        console.error('policy turn failed; falling back to heuristic', e);
-        const move = S3.chooseAIMove(board, dice, 'O');
-        if (!cancelled && move) playMove(move, 'O');
+        console.error('ucb1 turn failed; falling back to heuristic', e);
+        const fallback = S3.chooseAIMove(board, dice, 'O');
+        if (!cancelled && fallback) playMove(fallback, 'O');
       }
     }, 750);
     return () => { cancelled = true; clearTimeout(aiTimer.current); };
-  }, [phase, board, dice, playMove]);
+  }, [phase, board, dice, playMove, askUcb1]);
 
   const handleCellClick = (subIdx, cellIdx) => {
     if (phase !== 'player-turn') return;
