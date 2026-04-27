@@ -409,6 +409,57 @@ function RulesOverlay({ onClose }) {
   );
 }
 
+const _splashLinkStyle = {
+  appearance: 'none',
+  background: 'transparent',
+  color: THEME.textMuted,
+  border: 'none',
+  padding: '8px 8px',
+  fontSize: 14, fontWeight: 500, fontFamily: 'Inter, sans-serif',
+  cursor: 'pointer',
+  textDecoration: 'underline',
+  textUnderlineOffset: 3,
+};
+
+// ─── Credits overlay ───────────────────────────────────────────────────────
+function CreditsOverlay({ onClose }) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 70,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: THEME.bg,
+      fontFamily: 'Inter, sans-serif',
+      color: THEME.text,
+      padding: '32px 22px',
+    }}>
+      <div style={{ maxWidth: 360, textAlign: 'center', lineHeight: 1.6, fontSize: 16 }}>
+        <h2 style={{
+          fontSize: 22, fontWeight: 700, letterSpacing: '-0.01em',
+          margin: '0 0 18px',
+        }}>
+          Credits
+        </h2>
+        <p style={{ margin: '0 0 8px' }}>
+          Original game design by Alan Newman.
+        </p>
+        <p style={{ margin: '0 0 28px' }}>
+          Programmed by Álvaro Begué, with Claude (Anthropic).
+        </p>
+        <button onClick={onClose} style={{
+          appearance: 'none',
+          background: THEME.accent,
+          color: '#fff',
+          border: 'none',
+          padding: '12px 28px',
+          borderRadius: 999,
+          fontSize: 15, fontWeight: 600, fontFamily: 'Inter, sans-serif',
+          cursor: 'pointer',
+        }}>Back</button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Splash overlay ────────────────────────────────────────────────────────
 // First-load gate. Two reasons:
 //   1. iOS Safari and friends require a user gesture before any
@@ -417,7 +468,7 @@ function RulesOverlay({ onClose }) {
 //   2. Gives the player a clear "press to begin" beat, which feels
 //      better than landing mid-roll.
 // On tap we await unlockAudio() and then kick off the first turn.
-function SplashOverlay({ onStart, onShowRules }) {
+function SplashOverlay({ onStart, onShowRules, onShowCredits }) {
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 60,
@@ -455,18 +506,13 @@ function SplashOverlay({ onStart, onShowRules }) {
           cursor: 'pointer',
           boxShadow: '0 6px 18px rgba(0,0,0,0.14)',
         }}>Tap to start</button>
-        <div style={{ marginTop: 14 }}>
-          <button onClick={onShowRules} style={{
-            appearance: 'none',
-            background: 'transparent',
-            color: THEME.textMuted,
-            border: 'none',
-            padding: '8px 14px',
-            fontSize: 14, fontWeight: 500, fontFamily: 'Inter, sans-serif',
-            cursor: 'pointer',
-            textDecoration: 'underline',
-            textUnderlineOffset: 3,
-          }}>Game rules</button>
+        <div style={{
+          marginTop: 14,
+          display: 'flex', justifyContent: 'center', gap: 6,
+        }}>
+          <button onClick={onShowRules} style={_splashLinkStyle}>Game rules</button>
+          <span style={{ color: THEME.textMuted, alignSelf: 'center' }}>·</span>
+          <button onClick={onShowCredits} style={_splashLinkStyle}>Credits</button>
         </div>
       </div>
     </div>
@@ -474,7 +520,7 @@ function SplashOverlay({ onStart, onShowRules }) {
 }
 
 // ─── Win overlay ───────────────────────────────────────────────────────────
-function WinOverlay({ phase, onNewGame }) {
+function WinOverlay({ phase, onMenu }) {
   const title = phase === 'win-x' ? 'You win' : 'AI wins';
   const sub   = phase === 'win-x' ? 'meta tic-tac-toe achieved' : 'better luck next time';
   return (
@@ -502,7 +548,7 @@ function WinOverlay({ phase, onNewGame }) {
         <div style={{
           fontSize: 12, color: THEME.textMuted, marginTop: 6,
         }}>{sub}</div>
-        <button onClick={onNewGame} style={{
+        <button onClick={onMenu} style={{
           marginTop: 16,
           appearance: 'none',
           background: THEME.accent,
@@ -512,7 +558,7 @@ function WinOverlay({ phase, onNewGame }) {
           borderRadius: 999,
           fontSize: 13, fontWeight: 600, fontFamily: 'Inter, sans-serif',
           cursor: 'pointer',
-        }}>New game</button>
+        }}>Main menu</button>
       </div>
     </div>
   );
@@ -532,7 +578,11 @@ function App() {
   const [claimSeq, setClaimSeq] = useState(0);
   const [moveLog, setMoveLog] = useState([]);
   const [showRules, setShowRules] = useState(false);
+  const [showCredits, setShowCredits] = useState(false);
   const aiTimer = useRef(null);
+  // Remembers who opened the previous game so we can alternate seats
+  // across games. null on the very first game (then we coin-flip).
+  const lastStarterRef = useRef(null);
 
   const sum = dice[0] + dice[1];
   const mode = S3.diceMode(sum);
@@ -660,9 +710,18 @@ function App() {
     playMove(move, 'X');
   };
 
-  // Coin-flip the opening seat: 'X' (human first) half the time, 'O'
-  // (AI first) the other half.
-  const randomFirstPlayer = () => Math.random() < 0.5 ? 'X' : 'O';
+  // Pick the next opening seat: random on the very first game, then
+  // alternate (so a long session has equal first-move counts for each
+  // side). Updates the ref as a side effect so successive calls keep
+  // alternating.
+  const nextStarter = () => {
+    const last = lastStarterRef.current;
+    const starter = last == null
+      ? (Math.random() < 0.5 ? 'X' : 'O')
+      : (last === 'X' ? 'O' : 'X');
+    lastStarterRef.current = starter;
+    return starter;
+  };
 
   // First user gesture handler — unlocks audio (Chrome Android needs
   // ctx.resume() to resolve before the first sound) and starts play.
@@ -670,7 +729,7 @@ function App() {
     if (typeof window.unlockAudio === 'function') {
       try { await window.unlockAudio(); } catch {}
     }
-    startTurn(randomFirstPlayer(), S3.makeInitialBoard());
+    startTurn(nextStarter(), S3.makeInitialBoard());
   }, [startTurn]);
 
   const newGame = () => {
@@ -680,7 +739,17 @@ function App() {
     setJustClaimedAt(null);
     // Audio is already unlocked by this point (the splash button or any
     // prior tap), so we can roll straight away.
-    startTurn(randomFirstPlayer(), fresh);
+    startTurn(nextStarter(), fresh);
+  };
+
+  // End-of-game action: clean up the board and return to the splash
+  // screen so the player can choose to start again, view the rules,
+  // etc. The next round of play happens via the splash's Tap-to-start.
+  const backToMenu = () => {
+    setBoard(S3.makeInitialBoard());
+    setMoveLog([]);
+    setJustClaimedAt(null);
+    setPhase('splash');
   };
 
   return (
@@ -759,17 +828,21 @@ function App() {
         </div>
       </div>
 
-      {phase === 'splash' && !showRules && (
+      {phase === 'splash' && !showRules && !showCredits && (
         <SplashOverlay
           onStart={startFromSplash}
           onShowRules={() => setShowRules(true)}
+          onShowCredits={() => setShowCredits(true)}
         />
       )}
       {phase === 'splash' && showRules && (
         <RulesOverlay onClose={() => setShowRules(false)} />
       )}
+      {phase === 'splash' && showCredits && (
+        <CreditsOverlay onClose={() => setShowCredits(false)} />
+      )}
       {(phase === 'win-x' || phase === 'win-o') && (
-        <WinOverlay phase={phase} onNewGame={newGame} />
+        <WinOverlay phase={phase} onMenu={backToMenu} />
       )}
     </div>
   );
