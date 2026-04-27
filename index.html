@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Super 3</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; height: 100%; }
+    body {
+      background: #f6f3ec;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      overscroll-behavior: none;
+    }
+    button { font-family: inherit; }
+    @keyframes mark-in {
+      from { transform: scale(0.55); opacity: 0; }
+      to   { transform: scale(1);    opacity: 1; }
+    }
+    @keyframes claim-pop {
+      0%   { transform: scale(0.2) rotate(-12deg); opacity: 0; }
+      55%  { transform: scale(1.12) rotate(2deg);   opacity: 1; }
+      100% { transform: scale(1)    rotate(0);      opacity: 1; }
+    }
+    @keyframes fade-in {
+      from { opacity: 0; } to { opacity: 1; }
+    }
+
+    /* Layout — portrait (default): single column, dice over board, capped at 480px. */
+    .s3-shell {
+      display: flex;
+      flex-direction: column;
+      max-width: 480px;
+      margin: 0 auto;
+      padding: 14px 16px 22px;
+      min-height: 100vh;
+      box-sizing: border-box;
+    }
+    .s3-side { display: flex; flex-direction: column; }
+    .s3-board-wrap {
+      flex: 1;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+    }
+    /* Landscape: side-by-side. Dice/header/status fixed-width on the left,
+       board occupies a square that fits the viewport height on the right. */
+    @media (orientation: landscape) and (min-width: 640px) {
+      .s3-shell {
+        flex-direction: row;
+        align-items: stretch;
+        gap: 24px;
+        max-width: none;
+        padding: 16px 22px;
+        min-height: 100vh;
+        height: 100vh;
+      }
+      .s3-side {
+        flex: 0 0 auto;
+        width: clamp(240px, 32vw, 360px);
+        justify-content: flex-start;
+      }
+      .s3-board-wrap {
+        flex: 1;
+        align-items: center;
+        justify-content: center;
+        min-width: 0;
+        min-height: 0;
+      }
+      /* In landscape, size the board by the available height instead of width
+         so it stays square and fully visible. */
+      .s3-board-wrap > * {
+        height: min(100%, calc(100vh - 32px));
+        width: auto !important;
+        aspect-ratio: 1 / 1;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+  <!-- onnxruntime-web for in-browser inference of the trained policy. -->
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js" crossorigin="anonymous"></script>
+
+  <script type="text/babel" src="game.jsx"></script>
+  <script type="text/babel" src="sound.jsx"></script>
+  <script type="text/babel" src="policy.jsx"></script>
+  <script type="text/babel" src="app.jsx"></script>
+</body>
+</html>
