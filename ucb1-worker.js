@@ -147,6 +147,46 @@ function applyMoveAtRoot(s, sum, sub, cell) {
 
 const _legalSub  = new Uint8Array(81);
 const _legalCell = new Uint8Array(81);
+const _legalCls  = new Uint8Array(81);   // class for each legal move
+
+// Move-class priorities for the heuristic-biased rollout. Lower number
+// is better. Classification uses bit tricks on the per-(sub, player)
+// accumulators so the cost is a few ops per candidate.
+//
+//   0 — wins the game
+//   1 — claims a sub-board (3-in-a-row inside it OR 5th total mark)
+//   2 — blocks opp's 3-in-a-row threat (cell sits on an opp 2-in-a-row line)
+//   3 — move in the centre sub-board (sub == 4)
+//   4 — move in another middle-row sub-board (sub == 3 or 5)
+//   5 — anything else
+//
+// Sum=0 (remove) moves get class 5 — the user's classification only
+// applies to placements, and removes are rare enough (1/36 of dice)
+// that biasing them isn't worth the extra logic.
+const CLS_WIN        = 0;
+const CLS_CLAIM      = 1;
+const CLS_BLOCK      = 2;
+const CLS_CENTRE_SUB = 3;
+const CLS_MID_ROW    = 4;
+const CLS_OTHER      = 5;
+
+function classifyPlace(s, cur, sub, cell) {
+  const myAcc  = (cur === 0 ? s.subAccX[sub] : s.subAccO[sub]);
+  const newSub = (myAcc + MAGIC[cell]) >>> 0;
+  const newTot = s.total[sub] + 1;
+  const claims = ((newSub & LINE_MASK) !== 0) || ((newTot & 0x08) !== 0);
+  if (claims) {
+    const myMeta  = (cur === 0 ? s.metaAccX : s.metaAccO);
+    const newMeta = (myMeta + MAGIC[sub]) >>> 0;
+    if ((newMeta & WIN_MASK) !== 0) return CLS_WIN;
+    return CLS_CLAIM;
+  }
+  const oppAcc = (cur === 0 ? s.subAccO[sub] : s.subAccX[sub]);
+  if ((((oppAcc + MAGIC[cell]) >>> 0) & LINE_MASK) !== 0) return CLS_BLOCK;
+  if (sub === 4) return CLS_CENTRE_SUB;
+  if (sub === 3 || sub === 5) return CLS_MID_ROW;
+  return CLS_OTHER;
+}
 
 function rollout(s) {
   for (let turn = 0; turn < MAX_TURNS; turn++) {
@@ -208,7 +248,29 @@ function rollout(s) {
 
     if (n === 0) { s.toMove = opp; continue; }
 
-    const idx  = (Math.random() * n) | 0;
+    // Tactical move pick: among legal placements, prefer (in order)
+    // wins-game > claims-sub-board > blocks-opp's-3-in-a-row > rest.
+    // Pick uniformly among the highest-class set. Removes (sum==0)
+    // stay uniform — the user's classification is for placements.
+    let idx;
+    if (sum === 0) {
+      idx = (Math.random() * n) | 0;
+    } else {
+      let bestClass = CLS_OTHER + 1;
+      let bestCount = 0;
+      for (let i = 0; i < n; i++) {
+        let cls = classifyPlace(s, cur, _legalSub[i], _legalCell[i]);
+        if (cls > CLS_BLOCK) cls = CLS_OTHER;  // tactical: collapse
+        if (cls < bestClass) {
+          bestClass = cls;
+          bestCount = 1;
+          _legalCls[0] = i;
+        } else if (cls === bestClass) {
+          _legalCls[bestCount++] = i;
+        }
+      }
+      idx = _legalCls[(Math.random() * bestCount) | 0];
+    }
     const sb   = _legalSub[idx];
     const cell = _legalCell[idx];
 
@@ -293,11 +355,11 @@ function legalMovesAtRoot(s, sum) {
   return moves;
 }
 
-function ucb1Choose(rootState, sum, mePlayerStr, budget) {
+function ucb1Choose(rootState, sum, mePlayerStr, timeBudgetMs) {
   const me = mePlayerStr === 'X' ? 0 : 1;
   const moves = legalMovesAtRoot(rootState, sum);
   if (moves.length === 0) return null;
-  if (moves.length === 1) return moves[0];
+  if (moves.length === 1) return { move: moves[0], rollouts: 0 };
 
   const k = moves.length;
   const sumReward = new Float64Array(k);
@@ -329,21 +391,33 @@ function ucb1Choose(rootState, sum, mePlayerStr, budget) {
     sumReward[i] += rolloutFor(i);
     visits[i]++;
   }
-
   let total = k;
-  while (total < budget) {
-    const logN = Math.log(total);
-    let bestI = 0;
-    let bestV = -Infinity;
-    for (let i = 0; i < k; i++) {
-      const n    = visits[i];
-      const mean = sumReward[i] / n;
-      const ucb  = mean + c * Math.sqrt(logN / n);
-      if (ucb > bestV) { bestV = ucb; bestI = i; }
+
+  // UCB1 phase: do rollouts in chunks of 1000, check the wall-clock
+  // between chunks, stop once `timeBudgetMs` is up. We always finish
+  // the current chunk so the budget is a soft floor (overshoot is
+  // bounded by one chunk's runtime, ~12 ms at typical JS speeds).
+  const t0 = (typeof performance !== 'undefined' && performance.now)
+    ? performance.now() : Date.now();
+  const CHUNK = 1000;
+  for (;;) {
+    for (let j = 0; j < CHUNK; j++) {
+      const logN = Math.log(total);
+      let bestI = 0;
+      let bestV = -Infinity;
+      for (let i = 0; i < k; i++) {
+        const n    = visits[i];
+        const mean = sumReward[i] / n;
+        const ucb  = mean + c * Math.sqrt(logN / n);
+        if (ucb > bestV) { bestV = ucb; bestI = i; }
+      }
+      sumReward[bestI] += rolloutFor(bestI);
+      visits[bestI]++;
+      total++;
     }
-    sumReward[bestI] += rolloutFor(bestI);
-    visits[bestI]++;
-    total++;
+    const now = (typeof performance !== 'undefined' && performance.now)
+      ? performance.now() : Date.now();
+    if (now - t0 >= timeBudgetMs) break;
   }
 
   // Pick the most-visited move (low-variance MCTS root pick).
@@ -352,7 +426,22 @@ function ucb1Choose(rootState, sum, mePlayerStr, budget) {
   for (let i = 0; i < k; i++) {
     if (visits[i] > bestN) { bestN = visits[i]; bestI = i; }
   }
-  return moves[bestI];
+
+  // Per-move stats for diagnostics: visits, mean reward (win rate
+  // from this player's perspective), and best-mean rank for quick
+  // comparison with the visit-based pick.
+  const perMove = new Array(k);
+  for (let i = 0; i < k; i++) {
+    const n = visits[i];
+    perMove[i] = {
+      sub: moves[i].sub,
+      cell: moves[i].cell,
+      visits: n,
+      mean: n > 0 ? sumReward[i] / n : 0,
+    };
+  }
+
+  return { move: moves[bestI], rollouts: total, perMove };
 }
 
 // ─── Message handler ────────────────────────────────────────────────
@@ -366,13 +455,17 @@ self.onmessage = (e) => {
   const externalSum = data.dice[0] + data.dice[1];
   const internalSum = externalSum - 2;   // GUI uses 1..6 dice; engine 0..5
   const state       = buildState(data.board, data.player);
-  const move        = ucb1Choose(state, internalSum, data.player, data.budget);
+  const result      = ucb1Choose(state, internalSum, data.player, data.timeBudgetMs);
   const t1 = (typeof performance !== 'undefined' && performance.now)
     ? performance.now() : Date.now();
 
   self.postMessage({
     reqId: data.reqId,
-    move:  move,
-    stats: { rollouts: data.budget, time_ms: t1 - t0 },
+    move:  result ? result.move : null,
+    stats: {
+      rollouts: result ? result.rollouts : 0,
+      time_ms:  t1 - t0,
+      perMove:  result ? result.perMove : null,
+    },
   });
 };
