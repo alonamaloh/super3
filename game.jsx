@@ -107,10 +107,9 @@ function legalMoves(board, dice, currentPlayer) {
 }
 
 // Determine the owner of a single sub-board after a move.
-// Rules: 3-in-a-row wins; else, the player who places the 5th mark
-// claims it (equivalent to "first player whose count reaches 5",
-// since each placement adds a mark of the placing player and the
-// sub-board is locked once decided).
+// Rules: 3-in-a-row wins; else, the player whose own-color mark
+// count reaches 5 claims it (the player who places their 5th mark in
+// the sub-board, before the opponent does, owns it).
 function evaluateSubBoard(cells) {
   for (const [a,b,c] of WIN_LINES) {
     if (cells[a] && cells[a] === cells[b] && cells[a] === cells[c]) {
@@ -179,8 +178,8 @@ function winningLine(board) {
 //  +1000 wins game
 //  +200 claims a sub-board
 //  +50 creates a 2-in-a-row threat in a sub-board
-//  +30 plays in centre of sub-board
-//  +10 plays in centre sub-board (5)
+//  +30 plays in center of sub-board
+//  +10 plays in center sub-board (5)
 //  -100 the resulting position lets opponent obviously claim a sub-board (skipped — too costly)
 function scoreMove(board, move, player) {
   const opp = player === 'X' ? 'O' : 'X';
@@ -224,9 +223,9 @@ function scoreMove(board, move, player) {
     if (oc === 2 && ec === 1) score -= 30; // we left a threat (rough)
   }
 
-  // Centre cell of sub-board
+  // Center cell of sub-board
   if (move.cell === 4) score += 8;
-  // Centre sub-board
+  // Center sub-board
   if (move.sub === 4) score += 4;
 
   // Mark count progress towards 5.

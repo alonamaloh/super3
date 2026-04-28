@@ -12,18 +12,19 @@
 //
 // State is the bit-packed "30-bit accumulator" representation:
 //   - per (sub-board, player) uint32 with 8 line counters at pos2..pos9
-//     plus a per-player mark counter at pos0..pos1
+//     plus a per-player own-mark counter at pos0..pos1
 //   - per-player meta-board uint32 with the same encoding
 //   - per-(sub-board, player) 9-bit cell-occupancy bitmask
 //   - 9-bit "decided" sub-boards bitmask
-//   - per-sub-board total-mark counter (3 + count, so bit 3 fires at 5+)
 //
-// Win checks are a single AND: bit 2 of any line slot fires on
-// 3-in-a-row (line counter init 1, +1 per cell-in-line → 4 after 3
-// marks); bit 3 of pos1 fires on the carry from the 5th meta-mark
-// (= 5 sub-boards owned). The sub-board "5 marks total" rule uses the
-// separate total counter since the per-player accumulator only counts
-// own-color marks.
+// Win checks are a single AND on WIN_MASK = 0o4444444410:
+//   - bit 2 of any line slot fires on 3-in-a-row (line counter init 1,
+//     +1 per cell-in-line → 4 after 3 marks)
+//   - bit 3 of pos1 fires on the carry from the 5th own-color mark
+//     (own-mark counter init 3 in pos0; +1 per own placement; the
+//     carry into pos1 happens as the count goes 4 → 5)
+// So one AND on the placer's own accumulator covers both the
+// 3-in-a-row claim and the 5-of-own-color claim.
 
 const INIT_ACC  = 0o1111111103;
 const WIN_MASK  = 0o4444444410;
@@ -47,12 +48,10 @@ function newState() {
     cellsX:   new Uint16Array(9),
     cellsO:   new Uint16Array(9),
     decided:  0,
-    total:    new Uint8Array(9),
     toMove:   0,
   };
   s.subAccX.fill(INIT_ACC);
   s.subAccO.fill(INIT_ACC);
-  s.total.fill(3);
   return s;
 }
 
@@ -65,7 +64,6 @@ function cloneState(s) {
     cellsX:   new Uint16Array(s.cellsX),
     cellsO:   new Uint16Array(s.cellsO),
     decided:  s.decided,
-    total:    new Uint8Array(s.total),
     toMove:   s.toMove,
   };
 }
@@ -81,7 +79,7 @@ function buildState(board, toMoveStr) {
       s.decided |= (1 << sb);
       if (sub.owner === 'X') s.metaAccX = (s.metaAccX + MAGIC[sb]) >>> 0;
       else                   s.metaAccO = (s.metaAccO + MAGIC[sb]) >>> 0;
-      // Decided sub-boards' inner cells/totals are dead state — no rule
+      // Decided sub-boards' inner cells are dead state — no rule
       // reads them.
     } else {
       for (let c = 0; c < 9; c++) {
@@ -89,11 +87,9 @@ function buildState(board, toMoveStr) {
         if (m === 'X') {
           s.cellsX[sb]  |= (1 << c);
           s.subAccX[sb]  = (s.subAccX[sb] + MAGIC[c]) >>> 0;
-          s.total[sb]++;
         } else if (m === 'O') {
           s.cellsO[sb]  |= (1 << c);
           s.subAccO[sb]  = (s.subAccO[sb] + MAGIC[c]) >>> 0;
-          s.total[sb]++;
         }
       }
     }
@@ -116,7 +112,6 @@ function applyMoveAtRoot(s, sum, sub, cell) {
       s.cellsO[sub] &= ~(1 << cell);
       s.subAccO[sub] = (s.subAccO[sub] - MAGIC[cell]) >>> 0;
     }
-    s.total[sub]--;
   } else {
     if (cur === 0) {
       s.cellsX[sub] |= (1 << cell);
@@ -125,9 +120,10 @@ function applyMoveAtRoot(s, sum, sub, cell) {
       s.cellsO[sub] |= (1 << cell);
       s.subAccO[sub] = (s.subAccO[sub] + MAGIC[cell]) >>> 0;
     }
-    s.total[sub]++;
+    // Sub-board claim: 3-in-a-row OR placer's own count reaches 5.
+    // Both checks live in the same WIN_MASK on the placer's accumulator.
     const acc = cur === 0 ? s.subAccX[sub] : s.subAccO[sub];
-    const claimed = (acc & LINE_MASK) || ((s.total[sub] & 0x08) !== 0);
+    const claimed = (acc & WIN_MASK) !== 0;
     if (claimed) {
       s.decided |= (1 << sub);
       if (cur === 0) {
@@ -154,9 +150,9 @@ const _legalCls  = new Uint8Array(81);   // class for each legal move
 // accumulators so the cost is a few ops per candidate.
 //
 //   0 — wins the game
-//   1 — claims a sub-board (3-in-a-row inside it OR 5th total mark)
+//   1 — claims a sub-board (3-in-a-row inside it OR 5th own-color mark)
 //   2 — blocks opp's 3-in-a-row threat (cell sits on an opp 2-in-a-row line)
-//   3 — move in the centre sub-board (sub == 4)
+//   3 — move in the center sub-board (sub == 4)
 //   4 — move in another middle-row sub-board (sub == 3 or 5)
 //   5 — anything else
 //
@@ -173,14 +169,17 @@ const CLS_OTHER      = 5;
 function classifyPlace(s, cur, sub, cell) {
   const myAcc  = (cur === 0 ? s.subAccX[sub] : s.subAccO[sub]);
   const newSub = (myAcc + MAGIC[cell]) >>> 0;
-  const newTot = s.total[sub] + 1;
-  const claims = ((newSub & LINE_MASK) !== 0) || ((newTot & 0x08) !== 0);
+  // 3-in-a-row OR placer's own count reaches 5 — single AND on WIN_MASK.
+  const claims = (newSub & WIN_MASK) !== 0;
   if (claims) {
     const myMeta  = (cur === 0 ? s.metaAccX : s.metaAccO);
     const newMeta = (myMeta + MAGIC[sub]) >>> 0;
     if ((newMeta & WIN_MASK) !== 0) return CLS_WIN;
     return CLS_CLAIM;
   }
+  // Block check: would the OPPONENT close a 3-in-a-row by placing here?
+  // (We don't worry about their 5-of-own carry — their own count
+  // only changes when they place themselves.)
   const oppAcc = (cur === 0 ? s.subAccO[sub] : s.subAccX[sub]);
   if ((((oppAcc + MAGIC[cell]) >>> 0) & LINE_MASK) !== 0) return CLS_BLOCK;
   if (sub === 4) return CLS_CENTRE_SUB;
@@ -282,7 +281,6 @@ function rollout(s) {
         s.cellsO[sb] &= ~(1 << cell);
         s.subAccO[sb] = (s.subAccO[sb] - MAGIC[cell]) >>> 0;
       }
-      s.total[sb]--;
     } else {
       if (cur === 0) {
         s.cellsX[sb] |= (1 << cell);
@@ -291,9 +289,8 @@ function rollout(s) {
         s.cellsO[sb] |= (1 << cell);
         s.subAccO[sb] = (s.subAccO[sb] + MAGIC[cell]) >>> 0;
       }
-      s.total[sb]++;
       const acc = cur === 0 ? s.subAccX[sb] : s.subAccO[sb];
-      const claimed = (acc & LINE_MASK) || ((s.total[sb] & 0x08) !== 0);
+      const claimed = (acc & WIN_MASK) !== 0;
       if (claimed) {
         s.decided |= (1 << sb);
         if (cur === 0) {
@@ -355,7 +352,7 @@ function legalMovesAtRoot(s, sum) {
   return moves;
 }
 
-function ucb1Choose(rootState, sum, mePlayerStr, timeBudgetMs) {
+function ucb1Choose(rootState, sum, mePlayerStr, budget) {
   const me = mePlayerStr === 'X' ? 0 : 1;
   const moves = legalMovesAtRoot(rootState, sum);
   if (moves.length === 0) return null;
@@ -393,31 +390,23 @@ function ucb1Choose(rootState, sum, mePlayerStr, timeBudgetMs) {
   }
   let total = k;
 
-  // UCB1 phase: do rollouts in chunks of 1000, check the wall-clock
-  // between chunks, stop once `timeBudgetMs` is up. We always finish
-  // the current chunk so the budget is a soft floor (overshoot is
-  // bounded by one chunk's runtime, ~12 ms at typical JS speeds).
-  const t0 = (typeof performance !== 'undefined' && performance.now)
-    ? performance.now() : Date.now();
-  const CHUNK = 1000;
-  for (;;) {
-    for (let j = 0; j < CHUNK; j++) {
-      const logN = Math.log(total);
-      let bestI = 0;
-      let bestV = -Infinity;
-      for (let i = 0; i < k; i++) {
-        const n    = visits[i];
-        const mean = sumReward[i] / n;
-        const ucb  = mean + c * Math.sqrt(logN / n);
-        if (ucb > bestV) { bestV = ucb; bestI = i; }
-      }
-      sumReward[bestI] += rolloutFor(bestI);
-      visits[bestI]++;
-      total++;
+  // UCB1 phase: run additional rollouts until `budget` is reached.
+  // budget is a rollout count (not a wall-clock budget); the caller
+  // gates the visible "AI thinking" pause separately (e.g. with a
+  // 1 s sleep at the call site) so easy/medium feel deliberate.
+  while (total < budget) {
+    const logN = Math.log(total);
+    let bestI = 0;
+    let bestV = -Infinity;
+    for (let i = 0; i < k; i++) {
+      const n    = visits[i];
+      const mean = sumReward[i] / n;
+      const ucb  = mean + c * Math.sqrt(logN / n);
+      if (ucb > bestV) { bestV = ucb; bestI = i; }
     }
-    const now = (typeof performance !== 'undefined' && performance.now)
-      ? performance.now() : Date.now();
-    if (now - t0 >= timeBudgetMs) break;
+    sumReward[bestI] += rolloutFor(bestI);
+    visits[bestI]++;
+    total++;
   }
 
   // Pick the most-visited move (low-variance MCTS root pick).
@@ -455,7 +444,7 @@ self.onmessage = (e) => {
   const externalSum = data.dice[0] + data.dice[1];
   const internalSum = externalSum - 2;   // GUI uses 1..6 dice; engine 0..5
   const state       = buildState(data.board, data.player);
-  const result      = ucb1Choose(state, internalSum, data.player, data.timeBudgetMs);
+  const result      = ucb1Choose(state, internalSum, data.player, data.budget);
   const t1 = (typeof performance !== 'undefined' && performance.now)
     ? performance.now() : Date.now();
 

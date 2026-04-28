@@ -11,6 +11,11 @@ const { useState, useEffect, useRef, useMemo, useCallback } = React;
 const S3 = window.SUPER3;
 
 // ─── Theme ──────────────────────────────────────────────────────────────────
+// UCB1 rollout-count budget per difficulty level. Picked from the
+// budget tournament: 100/1k/100k gives ~+200 Elo per step, three
+// clearly distinguishable strength tiers.
+const DIFFICULTY_BUDGET = { easy: 100, medium: 1000, hard: 100000 };
+
 const THEME = {
   bg:          '#f6f3ec',
   surface:     '#ffffff',
@@ -50,8 +55,8 @@ function GlyphO({ size = 24, color, weight = 'normal', css }) {
 }
 
 // ─── Die ────────────────────────────────────────────────────────────────────
-// Standard 1..6 dice with the classic pip layout: 1 centre, 2 diagonal
-// corners, 3 corners + centre, 4 four corners, 5 four corners + centre,
+// Standard 1..6 dice with the classic pip layout: 1 center, 2 diagonal
+// corners, 3 corners + center, 4 four corners, 5 four corners + center,
 // 6 two columns of three.
 const PIP_POS = {
   TL: [27, 27], TR: [73, 27],
@@ -377,10 +382,16 @@ function RulesOverlay({ onClose }) {
         }}>
           Claiming a sub-board
         </h3>
+        <p style={{ margin: '0 0 10px' }}>
+          You claim a sub-board the moment either of these happens:
+        </p>
+        <ul style={{ margin: '0 0 10px', paddingLeft: 20 }}>
+          <li>Three of <i>your own</i> marks line up inside it (row, column, or diagonal); or</li>
+          <li>You place your <i>fifth</i> mark of your own color in it.</li>
+        </ul>
         <p style={{ margin: '0 0 18px' }}>
-          A sub-board is yours as soon as you either complete three-in-a-row
-          inside it, or place the fifth mark in it. Once claimed, the sub-board
-          is locked — no more marks can be placed or removed there.
+          Once claimed, the sub-board is locked — no more marks can be placed
+          or removed there.
         </p>
 
         <h3 style={{
@@ -390,8 +401,9 @@ function RulesOverlay({ onClose }) {
           Winning
         </h3>
         <p style={{ margin: '0 0 24px' }}>
-          You win when you either complete three-in-a-row of claimed
-          sub-boards on the meta-grid, or claim five or more sub-boards.
+          You win when you either claim three sub-boards in a row on the
+          meta-grid (row, column, or diagonal), or claim five sub-boards in
+          total.
         </p>
 
         <button onClick={onClose} style={{
@@ -495,17 +507,29 @@ function SplashOverlay({ onStart, onShowRules, onShowCredits }) {
             color: THEME.accent,
           }}>3</span>
         </div>
-        <button onClick={onStart} style={{
-          appearance: 'none',
-          background: THEME.accent,
-          color: '#fff',
-          border: 'none',
-          padding: '14px 36px',
-          borderRadius: 999,
-          fontSize: 16, fontWeight: 700, fontFamily: 'Inter, sans-serif',
-          cursor: 'pointer',
-          boxShadow: '0 6px 18px rgba(0,0,0,0.14)',
-        }}>Tap to start</button>
+        <div style={{
+          display: 'flex', justifyContent: 'center', gap: 10,
+          flexWrap: 'wrap',
+        }}>
+          {[
+            { key: 'easy',   label: 'Easy' },
+            { key: 'medium', label: 'Medium' },
+            { key: 'hard',   label: 'Hard' },
+          ].map(opt => (
+            <button key={opt.key} onClick={() => onStart(opt.key)} style={{
+              appearance: 'none',
+              background: THEME.accent,
+              color: '#fff',
+              border: 'none',
+              padding: '14px 24px',
+              borderRadius: 999,
+              fontSize: 16, fontWeight: 700, fontFamily: 'Inter, sans-serif',
+              cursor: 'pointer',
+              boxShadow: '0 6px 18px rgba(0,0,0,0.14)',
+              minWidth: 100,
+            }}>{opt.label}</button>
+          ))}
+        </div>
         <div style={{
           marginTop: 14,
           display: 'flex', justifyContent: 'center', gap: 6,
@@ -579,6 +603,9 @@ function App() {
   const [moveLog, setMoveLog] = useState([]);
   const [showRules, setShowRules] = useState(false);
   const [showCredits, setShowCredits] = useState(false);
+  // Difficulty is chosen on the splash and persists for subsequent
+  // games until the player goes back to Main menu and picks again.
+  const [difficulty, setDifficulty] = useState('medium');
   // Remembers who opened the previous game so we can alternate seats
   // across games. null on the very first game (then we coin-flip).
   const lastStarterRef = useRef(null);
@@ -697,32 +724,38 @@ function App() {
     };
   }, []);
 
-  const askUcb1 = useCallback((board, dice, player, timeBudgetMs) => {
+  const askUcb1 = useCallback((board, dice, player, budget) => {
     return new Promise((resolve) => {
       const w = ucb1WorkerRef.current;
       if (!w) { resolve({ move: null, stats: null }); return; }
       const reqId = ++ucb1ReqIdRef.current;
       ucb1PendingRef.current.set(reqId, resolve);
-      w.postMessage({ type: 'choose', board, dice, player, timeBudgetMs, reqId });
+      w.postMessage({ type: 'choose', board, dice, player, budget, reqId });
     });
   }, []);
 
-  // AI turn handler — UCB1-at-root, run in a Web Worker so the rollout
-  // budget doesn't block dice flicker / animation on the main thread.
-  // Fallback to the heuristic AI if the worker is unavailable.
+  // AI turn handler — UCB1-at-root, run in a Web Worker so the
+  // rollout budget doesn't block dice flicker / animation on the main
+  // thread. We gate the visible "AI is thinking" pause with a 1 s
+  // sleep so easy/medium (which finish in milliseconds) don't snap
+  // back instantly. Hard mode is allowed to overshoot on slow devices.
   useEffect(() => {
     if (phase !== 'ai-thinking') return;
     let cancelled = false;
+    const budget = DIFFICULTY_BUDGET[difficulty] ?? DIFFICULTY_BUDGET.medium;
     (async () => {
       try {
-        const { move, stats } = await askUcb1(board, dice, 'O', /* timeBudgetMs */ 1000);
+        const [{ move, stats }] = await Promise.all([
+          askUcb1(board, dice, 'O', budget),
+          new Promise(r => setTimeout(r, 1000)),   // minimum 1 s pause
+        ]);
         if (cancelled) return;
         if (stats) {
           const rate = stats.time_ms > 0
             ? Math.round(stats.rollouts / stats.time_ms * 1000)
             : 0;
           console.log(
-            `UCB1: ${stats.rollouts.toLocaleString()} rollouts in `
+            `UCB1[${difficulty}]: ${stats.rollouts.toLocaleString()} rollouts in `
             + `${stats.time_ms.toFixed(1)}ms (${rate.toLocaleString()}/s)`);
         }
         // The worker returns {sub, cell}; reconstruct the GUI's full
@@ -740,7 +773,7 @@ function App() {
       }
     })();
     return () => { cancelled = true; };
-  }, [phase, board, dice, playMove, askUcb1]);
+  }, [phase, board, dice, playMove, askUcb1, difficulty]);
 
   const handleCellClick = (subIdx, cellIdx) => {
     if (phase !== 'player-turn') return;
@@ -763,11 +796,13 @@ function App() {
   };
 
   // First user gesture handler — unlocks audio (Chrome Android needs
-  // ctx.resume() to resolve before the first sound) and starts play.
-  const startFromSplash = useCallback(async () => {
+  // ctx.resume() to resolve before the first sound), records the
+  // chosen difficulty, and starts play.
+  const startFromSplash = useCallback(async (chosenDifficulty) => {
     if (typeof window.unlockAudio === 'function') {
       try { await window.unlockAudio(); } catch {}
     }
+    setDifficulty(chosenDifficulty);
     startTurn(nextStarter(), S3.makeInitialBoard());
   }, [startTurn]);
 
