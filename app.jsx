@@ -149,8 +149,17 @@ function Mark({ value }) {
 // ─── Cell ──────────────────────────────────────────────────────────────────
 // `isLegal` controls the highlight (used on both turns so the AI's
 // candidate moves are visible). `clickable` is the actionable subset —
-// set only on the human's turn.
-function Cell({ value, isLegal, clickable, onClick, removeMode }) {
+// set only on the human's turn. `isLastMove` (with `lastMoveColor`)
+// flags the cell where the previous move landed — covers placements
+// (cell now has a mark) and removes (cell now empty) alike. Last-move
+// takes visual priority over the legal-cell ring on the rare overlap
+// (e.g. snake-eyes where the just-played cell is also a legal target).
+function Cell({ value, isLegal, isLastMove, lastMoveColor, clickable, onClick, removeMode }) {
+  const ringShadow = isLastMove
+    ? `inset 0 0 0 2.5px ${lastMoveColor}`
+    : isLegal
+    ? `inset 0 0 0 1.5px ${THEME.text}`
+    : 'none';
   return (
     <button
       onClick={onClick}
@@ -159,7 +168,7 @@ function Cell({ value, isLegal, clickable, onClick, removeMode }) {
         position: 'relative',
         appearance: 'none', border: 'none', padding: 0, margin: 0,
         background: 'transparent',
-        boxShadow: isLegal ? `inset 0 0 0 1.5px ${THEME.text}` : 'none',
+        boxShadow: ringShadow,
         cursor: clickable ? 'pointer' : 'default',
         borderRadius: 4,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -183,7 +192,7 @@ function Cell({ value, isLegal, clickable, onClick, removeMode }) {
 
 // ─── Sub-board ─────────────────────────────────────────────────────────────
 function SubBoard({ index, sub, legalCells, clickable, onCellClick, removeMode,
-                    justClaimedAt, claimSeq }) {
+                    justClaimedAt, claimSeq, lastMoveCell, lastMoveColor }) {
   const isClaimed = !!sub.owner;
   const showBigGlyph = sub.owner === 'X' || sub.owner === 'O';
   const bigColor = sub.owner === 'X' ? THEME.x : sub.owner === 'O' ? THEME.o : THEME.textMuted;
@@ -222,6 +231,8 @@ function SubBoard({ index, sub, legalCells, clickable, onCellClick, removeMode,
               <Cell
                 value={v}
                 isLegal={legal}
+                isLastMove={c === lastMoveCell}
+                lastMoveColor={lastMoveColor}
                 clickable={clickable && legal}
                 onClick={() => onCellClick(index, c)}
                 removeMode={removeMode}
@@ -280,7 +291,11 @@ function SubBoard({ index, sub, legalCells, clickable, onCellClick, removeMode,
 }
 
 // ─── Board ─────────────────────────────────────────────────────────────────
-function Board({ board, legalMap, clickable, onCellClick, removeMode, justClaimedAt, claimSeq }) {
+function Board({ board, legalMap, clickable, onCellClick, removeMode,
+                 justClaimedAt, claimSeq, lastMove }) {
+  const lastMoveColor = lastMove
+    ? (lastMove.player === 'X' ? THEME.x : THEME.o)
+    : null;
   return (
     <div style={{
       width: '100%',
@@ -301,6 +316,8 @@ function Board({ board, legalMap, clickable, onCellClick, removeMode, justClaime
           removeMode={removeMode}
           justClaimedAt={justClaimedAt}
           claimSeq={claimSeq}
+          lastMoveCell={lastMove && lastMove.sub === i ? lastMove.cell : null}
+          lastMoveColor={lastMoveColor}
         />
       ))}
     </div>
@@ -632,14 +649,14 @@ function QuitConfirmOverlay({ onConfirm, onCancel }) {
 }
 
 // ─── Win overlay ───────────────────────────────────────────────────────────
-function WinOverlay({ phase, twoPlayer, onMenu }) {
+function WinOverlay({ phase, twoPlayer, onPlayAgain, onMenu }) {
   let title, sub;
   if (twoPlayer) {
     // In pass-and-play, "You" is ambiguous, so name the winner directly.
     title = phase === 'win-x' ? 'X wins' : 'O wins';
     sub   = 'meta tic-tac-toe achieved';
   } else {
-    title = phase === 'win-x' ? 'You win' : 'AI wins';
+    title = phase === 'win-x' ? 'You win' : 'Computer wins';
     sub   = phase === 'win-x' ? 'meta tic-tac-toe achieved' : 'better luck next time';
   }
   return (
@@ -667,17 +684,31 @@ function WinOverlay({ phase, twoPlayer, onMenu }) {
         <div style={{
           fontSize: 12, color: THEME.textMuted, marginTop: 6,
         }}>{sub}</div>
-        <button onClick={onMenu} style={{
+        <div style={{
           marginTop: 16,
-          appearance: 'none',
-          background: THEME.accent,
-          color: '#fff',
-          border: 'none',
-          padding: '9px 18px',
-          borderRadius: 999,
-          fontSize: 13, fontWeight: 600, fontFamily: 'Inter, sans-serif',
-          cursor: 'pointer',
-        }}>Main menu</button>
+          display: 'flex', justifyContent: 'center', gap: 8,
+        }}>
+          <button onClick={onPlayAgain} style={{
+            appearance: 'none',
+            background: THEME.accent,
+            color: '#fff',
+            border: 'none',
+            padding: '9px 18px',
+            borderRadius: 999,
+            fontSize: 13, fontWeight: 600, fontFamily: 'Inter, sans-serif',
+            cursor: 'pointer',
+          }}>Play again</button>
+          <button onClick={onMenu} style={{
+            appearance: 'none',
+            background: THEME.surface,
+            color: THEME.text,
+            border: `1px solid ${THEME.line}`,
+            padding: '9px 18px',
+            borderRadius: 999,
+            fontSize: 13, fontWeight: 600, fontFamily: 'Inter, sans-serif',
+            cursor: 'pointer',
+          }}>Main menu</button>
+        </div>
       </div>
     </div>
   );
@@ -688,14 +719,19 @@ function App() {
   const [board, setBoard] = useState(() => S3.makeInitialBoard());
   const [dice, setDice] = useState(() => S3.rollDice());
   const [rolling, setRolling] = useState(false);
-  const [currentPlayer, setCurrentPlayer] = useState('X'); // X = human, O = AI
+  const [currentPlayer, setCurrentPlayer] = useState('X'); // 1P: X = human, O = computer; 2P: both human
   // Start in 'splash': first-load gate so we have a user gesture before
   // the first roll's clatter fires (Chrome Android refuses to play if
   // ctx.resume() hasn't finished).
   const [phase, setPhase] = useState('splash');
   const [justClaimedAt, setJustClaimedAt] = useState(null);
   const [claimSeq, setClaimSeq] = useState(0);
-  const [moveLog, setMoveLog] = useState([]);
+  // Cell where the previous move landed — placement or remove. Used
+  // to draw a colored ring on that cell so you can see at a glance
+  // where the opponent (or, in 2P, the previous player) just played.
+  // Cleared between games; survives no-move skips so the previous
+  // play stays visible while dice are rolled and the turn passes.
+  const [lastMove, setLastMove] = useState(null);
   const [showRules, setShowRules] = useState(false);
   const [showCredits, setShowCredits] = useState(false);
   const [showQuitConfirm, setShowQuitConfirm] = useState(false);
@@ -773,7 +809,7 @@ function App() {
       if (!board.sub[i].owner && next.sub[i].owner) { claimed = i; break; }
     }
     setBoard(next);
-    setMoveLog(l => [...l, { player, move, dice }]);
+    setLastMove({ sub: move.sub, cell: move.cell, player });
     const result = S3.evaluateGame(next);
     if (claimed !== null) {
       setJustClaimedAt(claimed);
@@ -923,9 +959,20 @@ function App() {
   // for both entry points.
   const backToMenu = () => {
     setBoard(S3.makeInitialBoard());
-    setMoveLog([]);
+    setLastMove(null);
     setJustClaimedAt(null);
     setPhase('splash');
+  };
+
+  // "Play again" from the win overlay: keep the current difficulty,
+  // skip the splash, fire up a new game right away. Saves a tap on
+  // the common "let's run it back" case.
+  const playAgain = () => {
+    const fresh = S3.makeInitialBoard();
+    setBoard(fresh);
+    setLastMove(null);
+    setJustClaimedAt(null);
+    startTurn(nextStarter(), fresh);
   };
 
   // Mid-game "Quit game" guard: a stray tap on a small pill in the
@@ -934,8 +981,11 @@ function App() {
   const confirmQuit = () => setShowQuitConfirm(true);
 
   return (
+    // The min-height pair (100vh fallback, 100dvh override) lives in the
+    // .s3-root CSS rule rather than inline because a JS style object
+    // can't carry the same property twice — the second key would simply
+    // overwrite the first and the fallback would be lost.
     <div className="s3-root" style={{
-      minHeight: '100vh',
       background: THEME.bg,
       color: THEME.text,
       fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
@@ -1017,6 +1067,7 @@ function App() {
             removeMode={mode === 'remove' && phase === 'player-turn'}
             justClaimedAt={justClaimedAt}
             claimSeq={claimSeq}
+            lastMove={lastMove}
           />
         </div>
       </div>
@@ -1035,7 +1086,12 @@ function App() {
         <CreditsOverlay onClose={() => setShowCredits(false)} />
       )}
       {(phase === 'win-x' || phase === 'win-o') && (
-        <WinOverlay phase={phase} twoPlayer={difficulty === '2p'} onMenu={backToMenu} />
+        <WinOverlay
+          phase={phase}
+          twoPlayer={difficulty === '2p'}
+          onPlayAgain={playAgain}
+          onMenu={backToMenu}
+        />
       )}
       {showQuitConfirm && (
         <QuitConfirmOverlay

@@ -30,7 +30,17 @@
       from { opacity: 0; } to { opacity: 1; }
     }
 
-    /* Layout — portrait (default): single column, dice over board, capped at 480px. */
+    /* Layout — portrait (default): single column, dice over board, capped at 480px.
+       Heights use 100dvh (dynamic viewport height) so iOS Safari and other
+       mobile browsers don't overshoot when the address bar is showing —
+       100vh equals the URL-bar-collapsed height and triggers a small scroll
+       on first load. Plain 100vh is kept as a fallback for browsers that
+       don't recognise dvh (pre-2022 vintage). */
+    html, body { overflow: hidden; }
+    .s3-root {
+      min-height: 100vh;
+      min-height: 100dvh;
+    }
     .s3-shell {
       display: flex;
       flex-direction: column;
@@ -38,6 +48,7 @@
       margin: 0 auto;
       padding: 14px 16px 22px;
       min-height: 100vh;
+      min-height: 100dvh;
       box-sizing: border-box;
     }
     .s3-side { display: flex; flex-direction: column; }
@@ -58,6 +69,8 @@
         padding: 16px 22px;
         min-height: 100vh;
         height: 100vh;
+        min-height: 100dvh;
+        height: 100dvh;
       }
       .s3-side {
         flex: 0 0 auto;
@@ -75,6 +88,7 @@
          so it stays square and fully visible. */
       .s3-board-wrap > * {
         height: min(100%, calc(100vh - 32px));
+        height: min(100%, calc(100dvh - 32px));
         width: auto !important;
         aspect-ratio: 1 / 1;
       }
@@ -92,14 +106,14 @@
 
   <!-- Cache-bust version. Replaced at deploy time with the source repo's
        git short SHA (see CLAUDE.md "Super 3 GitHub Pages deployment"); the
-       literal string `04041cb` is fine for local serve.py dev. Used
+       literal string `6dbc943` is fine for local serve.py dev. Used
        both as the script-tag query and as window.__SUPER3_VERSION__ so
        app.jsx can stamp the same version onto its `new Worker(...)`
        URL — keeping app.jsx and ucb1-worker.js in lockstep. -->
-  <script>window.__SUPER3_VERSION__ = '04041cb';</script>
+  <script>window.__SUPER3_VERSION__ = '6dbc943';</script>
 
-  <script type="text/babel" src="game.jsx?v=04041cb"></script>
-  <script type="text/babel" src="sound.jsx?v=04041cb"></script>
-  <script type="text/babel" src="app.jsx?v=04041cb"></script>
+  <script type="text/babel" src="game.jsx?v=6dbc943"></script>
+  <script type="text/babel" src="sound.jsx?v=6dbc943"></script>
+  <script type="text/babel" src="app.jsx?v=6dbc943"></script>
 </body>
 </html>
