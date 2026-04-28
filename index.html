@@ -90,8 +90,16 @@
   <!-- AI lives in a Web Worker (gui/super3/ucb1-worker.js); loaded
        by app.jsx via `new Worker(...)`, no script tag needed here. -->
 
-  <script type="text/babel" src="game.jsx"></script>
-  <script type="text/babel" src="sound.jsx"></script>
-  <script type="text/babel" src="app.jsx"></script>
+  <!-- Cache-bust version. Replaced at deploy time with the source repo's
+       git short SHA (see CLAUDE.md "Super 3 GitHub Pages deployment"); the
+       literal string `04041cb` is fine for local serve.py dev. Used
+       both as the script-tag query and as window.__SUPER3_VERSION__ so
+       app.jsx can stamp the same version onto its `new Worker(...)`
+       URL — keeping app.jsx and ucb1-worker.js in lockstep. -->
+  <script>window.__SUPER3_VERSION__ = '04041cb';</script>
+
+  <script type="text/babel" src="game.jsx?v=04041cb"></script>
+  <script type="text/babel" src="sound.jsx?v=04041cb"></script>
+  <script type="text/babel" src="app.jsx?v=04041cb"></script>
 </body>
 </html>

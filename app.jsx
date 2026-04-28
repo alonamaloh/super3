@@ -307,7 +307,11 @@ function Board({ board, legalMap, clickable, onCellClick, removeMode, justClaime
   );
 }
 
-function ModeChip({ mode, sum, phase }) {
+function ModeChip({ mode, phase }) {
+  // Plain place rolls don't get a chip — the highlighted target cells
+  // already convey the move. Only the special-action rolls and the
+  // no-moves edge case need prose. Layout space is preserved by the
+  // wrapper's minHeight (see the App's render).
   let label, color;
   if (phase === 'no-moves') {
     label = 'No legal moves — turn skipped';
@@ -319,8 +323,7 @@ function ModeChip({ mode, sum, phase }) {
     label = 'Boxcars — wild, play anywhere';
     color = THEME.accent;
   } else {
-    label = `Target board ${sum} or cell ${sum}`;
-    color = THEME.text;
+    return null;
   }
   return (
     <div style={{
@@ -508,6 +511,11 @@ function SplashOverlay({ onStart, onShowRules, onShowCredits }) {
           }}>3</span>
         </div>
         <div style={{
+          fontSize: 13, color: THEME.textMuted,
+          fontWeight: 500, marginBottom: 10,
+          letterSpacing: '0.02em', textTransform: 'uppercase',
+        }}>vs computer</div>
+        <div style={{
           display: 'flex', justifyContent: 'center', gap: 10,
           flexWrap: 'wrap',
         }}>
@@ -531,7 +539,26 @@ function SplashOverlay({ onStart, onShowRules, onShowCredits }) {
           ))}
         </div>
         <div style={{
-          marginTop: 14,
+          marginTop: 22,
+          fontSize: 13, color: THEME.textMuted,
+          fontWeight: 500, marginBottom: 10,
+          letterSpacing: '0.02em', textTransform: 'uppercase',
+        }}>pass and play</div>
+        <div style={{ display: 'flex', justifyContent: 'center' }}>
+          <button onClick={() => onStart('2p')} style={{
+            appearance: 'none',
+            background: THEME.surface,
+            color: THEME.text,
+            border: `2px solid ${THEME.accent}`,
+            padding: '12px 24px',
+            borderRadius: 999,
+            fontSize: 16, fontWeight: 700, fontFamily: 'Inter, sans-serif',
+            cursor: 'pointer',
+            minWidth: 100,
+          }}>2 players</button>
+        </div>
+        <div style={{
+          marginTop: 18,
           display: 'flex', justifyContent: 'center', gap: 6,
         }}>
           <button onClick={onShowRules} style={_splashLinkStyle}>Game rules</button>
@@ -543,10 +570,78 @@ function SplashOverlay({ onStart, onShowRules, onShowCredits }) {
   );
 }
 
+// ─── Quit-confirm overlay ──────────────────────────────────────────────────
+// Custom dialog instead of window.confirm() so the URL doesn't appear in
+// the dialog header. Same backdrop + card styling as WinOverlay.
+function QuitConfirmOverlay({ onConfirm, onCancel }) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 55,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'rgba(20,20,20,0.32)',
+      backdropFilter: 'blur(6px)',
+      animation: 'fade-in .15s ease both',
+      fontFamily: 'Inter, sans-serif',
+    }}>
+      <div style={{
+        background: THEME.surface,
+        border: `1px solid ${THEME.line}`,
+        borderRadius: 18,
+        padding: '22px 26px',
+        boxShadow: '0 12px 40px rgba(0,0,0,0.18)',
+        textAlign: 'center',
+        minWidth: 260,
+        maxWidth: 320,
+      }}>
+        <div style={{
+          fontSize: 18, fontWeight: 700, color: THEME.text,
+          letterSpacing: '-0.01em',
+        }}>Quit game?</div>
+        <div style={{
+          fontSize: 13, color: THEME.textMuted, marginTop: 8,
+          lineHeight: 1.4,
+        }}>This will return you to the main menu and discard the current game.</div>
+        <div style={{
+          marginTop: 18,
+          display: 'flex', justifyContent: 'center', gap: 10,
+        }}>
+          <button onClick={onCancel} style={{
+            appearance: 'none',
+            background: THEME.surface,
+            color: THEME.text,
+            border: `1px solid ${THEME.line}`,
+            padding: '9px 18px',
+            borderRadius: 999,
+            fontSize: 13, fontWeight: 600, fontFamily: 'Inter, sans-serif',
+            cursor: 'pointer',
+          }}>Cancel</button>
+          <button onClick={onConfirm} style={{
+            appearance: 'none',
+            background: THEME.accent,
+            color: '#fff',
+            border: 'none',
+            padding: '9px 18px',
+            borderRadius: 999,
+            fontSize: 13, fontWeight: 600, fontFamily: 'Inter, sans-serif',
+            cursor: 'pointer',
+          }}>Quit</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Win overlay ───────────────────────────────────────────────────────────
-function WinOverlay({ phase, onMenu }) {
-  const title = phase === 'win-x' ? 'You win' : 'AI wins';
-  const sub   = phase === 'win-x' ? 'meta tic-tac-toe achieved' : 'better luck next time';
+function WinOverlay({ phase, twoPlayer, onMenu }) {
+  let title, sub;
+  if (twoPlayer) {
+    // In pass-and-play, "You" is ambiguous, so name the winner directly.
+    title = phase === 'win-x' ? 'X wins' : 'O wins';
+    sub   = 'meta tic-tac-toe achieved';
+  } else {
+    title = phase === 'win-x' ? 'You win' : 'AI wins';
+    sub   = phase === 'win-x' ? 'meta tic-tac-toe achieved' : 'better luck next time';
+  }
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 50,
@@ -603,6 +698,7 @@ function App() {
   const [moveLog, setMoveLog] = useState([]);
   const [showRules, setShowRules] = useState(false);
   const [showCredits, setShowCredits] = useState(false);
+  const [showQuitConfirm, setShowQuitConfirm] = useState(false);
   // Difficulty is chosen on the splash and persists for subsequent
   // games until the player goes back to Main menu and picks again.
   const [difficulty, setDifficulty] = useState('medium');
@@ -637,6 +733,11 @@ function App() {
   // move — skip and recurse for the other player. (No draws: we just
   // keep cycling until somebody gets a legal roll. In practice that's
   // immediate, since sum=10 (1/36) always lets you play anywhere.)
+  //
+  // In 2-player (pass-and-play) mode O is also a human, so O's turn
+  // routes to 'player-turn' instead of 'ai-thinking'. `difficulty` is
+  // a useCallback dep so the captured value stays current after the
+  // splash-screen pick.
   const startTurn = useCallback((player, currentBoard) => {
     setCurrentPlayer(player);
     setRolling(true);
@@ -659,9 +760,10 @@ function App() {
         }, 1100);
         return;
       }
-      setPhase(player === 'X' ? 'player-turn' : 'ai-thinking');
+      const isAi = player === 'O' && difficulty !== '2p';
+      setPhase(isAi ? 'ai-thinking' : 'player-turn');
     }, 560);
-  }, []);
+  }, [difficulty]);
 
   // Apply a move and pass turn.
   const playMove = useCallback((move, player) => {
@@ -706,7 +808,14 @@ function App() {
   const ucb1PendingRef = useRef(new Map());
   const ucb1ReqIdRef = useRef(0);
   useEffect(() => {
-    const w = new Worker('ucb1-worker.js');
+    // Tag the worker URL with the same cache-bust version the HTML used
+    // for app.jsx (see Super 3.html). This keeps app.jsx and the worker
+    // in lockstep across deploys: a stale-cached pair can't happen
+    // because both URLs change together. Falls back to 'dev' if the
+    // HTML didn't define the global (e.g., served outside the deploy
+    // pipeline).
+    const v = (typeof window !== 'undefined' && window.__SUPER3_VERSION__) || 'dev';
+    const w = new Worker('ucb1-worker.js?v=' + v);
     w.onmessage = (e) => {
       const { reqId, move, stats } = e.data;
       const resolver = ucb1PendingRef.current.get(reqId);
@@ -779,7 +888,9 @@ function App() {
     if (phase !== 'player-turn') return;
     const move = moves.find(m => m.sub === subIdx && m.cell === cellIdx);
     if (!move) return;
-    playMove(move, 'X');
+    // Play as whoever is on the clock. In 1P this is always 'X' (the
+    // AI moves via its own effect). In 2P (pass-and-play) it alternates.
+    playMove(move, currentPlayer);
   };
 
   // Pick the next opening seat: random on the very first game, then
@@ -806,25 +917,21 @@ function App() {
     startTurn(nextStarter(), S3.makeInitialBoard());
   }, [startTurn]);
 
-  const newGame = () => {
-    const fresh = S3.makeInitialBoard();
-    setBoard(fresh);
-    setMoveLog([]);
-    setJustClaimedAt(null);
-    // Audio is already unlocked by this point (the splash button or any
-    // prior tap), so we can roll straight away.
-    startTurn(nextStarter(), fresh);
-  };
-
-  // End-of-game action: clean up the board and return to the splash
-  // screen so the player can choose to start again, view the rules,
-  // etc. The next round of play happens via the splash's Tap-to-start.
+  // Both the in-game "Quit game" button and the end-of-game overlay
+  // route back to the splash, so the player picks a difficulty for the
+  // next game (instead of inheriting the previous one). Same handler
+  // for both entry points.
   const backToMenu = () => {
     setBoard(S3.makeInitialBoard());
     setMoveLog([]);
     setJustClaimedAt(null);
     setPhase('splash');
   };
+
+  // Mid-game "Quit game" guard: a stray tap on a small pill in the
+  // header shouldn't trash an in-progress game. The end-of-game
+  // overlay's "Main menu" doesn't need this — there's nothing to lose.
+  const confirmQuit = () => setShowQuitConfirm(true);
 
   return (
     <div className="s3-root" style={{
@@ -851,13 +958,22 @@ function App() {
                 letterSpacing: '-0.02em',
               }}>3</span>
             </div>
-            <button onClick={newGame} style={{
-              appearance: 'none', border: `1px solid ${THEME.line}`,
-              background: THEME.surface, color: THEME.text,
-              padding: '6px 12px', borderRadius: 999,
-              fontSize: 12, fontFamily: 'Inter, sans-serif', fontWeight: 500,
-              cursor: 'pointer',
-            }}>New game</button>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button onClick={() => setShowRules(true)} style={{
+                appearance: 'none', border: `1px solid ${THEME.line}`,
+                background: THEME.surface, color: THEME.text,
+                padding: '6px 12px', borderRadius: 999,
+                fontSize: 12, fontFamily: 'Inter, sans-serif', fontWeight: 500,
+                cursor: 'pointer',
+              }}>Rules</button>
+              <button onClick={confirmQuit} style={{
+                appearance: 'none', border: `1px solid ${THEME.line}`,
+                background: THEME.surface, color: THEME.text,
+                padding: '6px 12px', borderRadius: 999,
+                fontSize: 12, fontFamily: 'Inter, sans-serif', fontWeight: 500,
+                cursor: 'pointer',
+              }}>Quit game</button>
+            </div>
           </div>
 
           {/* Dice */}
@@ -872,18 +988,21 @@ function App() {
               <Die value={dice[1]} rolling={rolling}
                    color={currentPlayer === 'X' ? THEME.x : THEME.o} />
             </div>
-            {/* Bubble: only on the human's turn, and only after the dice
-                have settled (otherwise it would reveal the roll's
-                result before the flicker animation does). The wrapper
-                always occupies its slot so the rest of the layout
-                doesn't shift when the chip is hidden. */}
+            {/* Bubble: shown only for the special-action rolls (snake
+                eyes / boxcars) and the no-moves edge case — those need
+                the prose explanation. Plain place rolls (sums 3..11)
+                don't get a chip; the visual cue from the highlighted
+                target cells already says "play here". The wrapper keeps
+                its `visibility: hidden` slot so the surrounding layout
+                stays put when no chip is rendered. */}
             <div style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              visibility: (currentPlayer === 'X' &&
-                           (phase === 'player-turn' || phase === 'no-moves'))
+              minHeight: 34,
+              visibility: ((phase === 'player-turn' && mode !== 'place')
+                        || phase === 'no-moves')
                 ? 'visible' : 'hidden',
             }}>
-              <ModeChip mode={mode} sum={sum} phase={phase} />
+              <ModeChip mode={mode} phase={phase} />
             </div>
           </div>
         </div>
@@ -895,7 +1014,7 @@ function App() {
             legalMap={legalMap}
             clickable={phase === 'player-turn'}
             onCellClick={handleCellClick}
-            removeMode={mode === 'remove' && currentPlayer === 'X'}
+            removeMode={mode === 'remove' && phase === 'player-turn'}
             justClaimedAt={justClaimedAt}
             claimSeq={claimSeq}
           />
@@ -909,14 +1028,20 @@ function App() {
           onShowCredits={() => setShowCredits(true)}
         />
       )}
-      {phase === 'splash' && showRules && (
+      {showRules && (
         <RulesOverlay onClose={() => setShowRules(false)} />
       )}
       {phase === 'splash' && showCredits && (
         <CreditsOverlay onClose={() => setShowCredits(false)} />
       )}
       {(phase === 'win-x' || phase === 'win-o') && (
-        <WinOverlay phase={phase} onMenu={backToMenu} />
+        <WinOverlay phase={phase} twoPlayer={difficulty === '2p'} onMenu={backToMenu} />
+      )}
+      {showQuitConfirm && (
+        <QuitConfirmOverlay
+          onCancel={() => setShowQuitConfirm(false)}
+          onConfirm={() => { setShowQuitConfirm(false); backToMenu(); }}
+        />
       )}
     </div>
   );
