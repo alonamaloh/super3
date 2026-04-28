@@ -106,14 +106,14 @@
 
   <!-- Cache-bust version. Replaced at deploy time with the source repo's
        git short SHA (see CLAUDE.md "Super 3 GitHub Pages deployment"); the
-       literal string `6dbc943` is fine for local serve.py dev. Used
+       literal string `f32e2da` is fine for local serve.py dev. Used
        both as the script-tag query and as window.__SUPER3_VERSION__ so
        app.jsx can stamp the same version onto its `new Worker(...)`
        URL — keeping app.jsx and ucb1-worker.js in lockstep. -->
-  <script>window.__SUPER3_VERSION__ = '6dbc943';</script>
+  <script>window.__SUPER3_VERSION__ = 'f32e2da';</script>
 
-  <script type="text/babel" src="game.jsx?v=6dbc943"></script>
-  <script type="text/babel" src="sound.jsx?v=6dbc943"></script>
-  <script type="text/babel" src="app.jsx?v=6dbc943"></script>
+  <script type="text/babel" src="game.jsx?v=f32e2da"></script>
+  <script type="text/babel" src="sound.jsx?v=f32e2da"></script>
+  <script type="text/babel" src="app.jsx?v=f32e2da"></script>
 </body>
 </html>

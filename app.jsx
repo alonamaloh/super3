@@ -745,24 +745,34 @@ function App() {
   const sum = dice[0] + dice[1];
   const mode = S3.diceMode(sum);
 
+  // Mode + "whose turn it is" are derived live from `difficulty` and
+  // `currentPlayer`. The phase used to encode both ("player-turn" vs
+  // "ai-thinking"), which forced startTurn to capture `difficulty` in
+  // its closure to decide which one to set — and the splash buttons
+  // could fire startTurn before React had committed the new
+  // difficulty, freezing the wrong choice. Now `phase` only tracks
+  // game-loop state ('awaiting-move' for either side); the AI/human
+  // question is answered fresh at every render from the live state.
+  const isHumanTurn = currentPlayer === 'X' || difficulty === '2p';
+
   // Compute legal moves for the current player.
   const moves = useMemo(() => {
-    if (phase !== 'player-turn' && phase !== 'ai-thinking') return [];
+    if (phase !== 'awaiting-move') return [];
     return S3.legalMoves(board, dice, currentPlayer);
   }, [board, dice, currentPlayer, phase]);
 
-  // Build legalMap: subIdx → Set of cell indices. Only on the human's
-  // turn — highlighting AI candidates makes the squares look tappable
-  // when they aren't.
+  // Build legalMap: subIdx → Set of cell indices. Only when a human is
+  // on the clock — highlighting AI candidates makes the squares look
+  // tappable when they aren't.
   const legalMap = useMemo(() => {
     const m = new Map();
-    if (phase !== 'player-turn') return m;
+    if (phase !== 'awaiting-move' || !isHumanTurn) return m;
     for (const mv of moves) {
       if (!m.has(mv.sub)) m.set(mv.sub, new Set());
       m.get(mv.sub).add(mv.cell);
     }
     return m;
-  }, [moves, phase]);
+  }, [moves, phase, isHumanTurn]);
 
   // Start a fresh turn: roll dice for `player` against `currentBoard`,
   // then either prompt them to play or — if the dice produced no legal
@@ -770,10 +780,9 @@ function App() {
   // keep cycling until somebody gets a legal roll. In practice that's
   // immediate, since sum=10 (1/36) always lets you play anywhere.)
   //
-  // In 2-player (pass-and-play) mode O is also a human, so O's turn
-  // routes to 'player-turn' instead of 'ai-thinking'. `difficulty` is
-  // a useCallback dep so the captured value stays current after the
-  // splash-screen pick.
+  // No mode branching here — we always land in 'awaiting-move' and let
+  // the AI useEffect (which reads the live `difficulty`) decide
+  // whether to take the turn for O.
   const startTurn = useCallback((player, currentBoard) => {
     setCurrentPlayer(player);
     setRolling(true);
@@ -796,10 +805,9 @@ function App() {
         }, 1100);
         return;
       }
-      const isAi = player === 'O' && difficulty !== '2p';
-      setPhase(isAi ? 'ai-thinking' : 'player-turn');
+      setPhase('awaiting-move');
     }, 560);
-  }, [difficulty]);
+  }, []);
 
   // Apply a move and pass turn.
   const playMove = useCallback((move, player) => {
@@ -884,8 +892,15 @@ function App() {
   // thread. We gate the visible "AI is thinking" pause with a 1 s
   // sleep so easy/medium (which finish in milliseconds) don't snap
   // back instantly. Hard mode is allowed to overshoot on slow devices.
+  //
+  // Fires only when the live state is "awaiting-move + computer
+  // controls O + 1-player mode". `difficulty` and `currentPlayer` are
+  // in the dep array so this effect re-evaluates whenever the mode or
+  // the active seat changes — no closure can stale-capture them.
   useEffect(() => {
-    if (phase !== 'ai-thinking') return;
+    if (phase !== 'awaiting-move') return;
+    if (currentPlayer !== 'O') return;
+    if (difficulty === '2p') return;
     let cancelled = false;
     const budget = DIFFICULTY_BUDGET[difficulty] ?? DIFFICULTY_BUDGET.medium;
     (async () => {
@@ -918,10 +933,10 @@ function App() {
       }
     })();
     return () => { cancelled = true; };
-  }, [phase, board, dice, playMove, askUcb1, difficulty]);
+  }, [phase, currentPlayer, difficulty, board, dice, playMove, askUcb1]);
 
   const handleCellClick = (subIdx, cellIdx) => {
-    if (phase !== 'player-turn') return;
+    if (phase !== 'awaiting-move' || !isHumanTurn) return;
     const move = moves.find(m => m.sub === subIdx && m.cell === cellIdx);
     if (!move) return;
     // Play as whoever is on the clock. In 1P this is always 'X' (the
@@ -1048,8 +1063,9 @@ function App() {
             <div style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               minHeight: 34,
-              visibility: ((phase === 'player-turn' && mode !== 'place')
-                        || phase === 'no-moves')
+              visibility: (isHumanTurn &&
+                           ((phase === 'awaiting-move' && mode !== 'place')
+                            || phase === 'no-moves'))
                 ? 'visible' : 'hidden',
             }}>
               <ModeChip mode={mode} phase={phase} />
@@ -1062,9 +1078,9 @@ function App() {
           <Board
             board={board}
             legalMap={legalMap}
-            clickable={phase === 'player-turn'}
+            clickable={phase === 'awaiting-move' && isHumanTurn}
             onCellClick={handleCellClick}
-            removeMode={mode === 'remove' && phase === 'player-turn'}
+            removeMode={mode === 'remove' && phase === 'awaiting-move' && isHumanTurn}
             justClaimedAt={justClaimedAt}
             claimSeq={claimSeq}
             lastMove={lastMove}
