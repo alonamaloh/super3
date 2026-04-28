@@ -579,7 +579,6 @@ function App() {
   const [moveLog, setMoveLog] = useState([]);
   const [showRules, setShowRules] = useState(false);
   const [showCredits, setShowCredits] = useState(false);
-  const aiTimer = useRef(null);
   // Remembers who opened the previous game so we can alternate seats
   // across games. null on the very first game (then we coin-flip).
   const lastStarterRef = useRef(null);
@@ -698,13 +697,13 @@ function App() {
     };
   }, []);
 
-  const askUcb1 = useCallback((board, dice, player, budget) => {
+  const askUcb1 = useCallback((board, dice, player, timeBudgetMs) => {
     return new Promise((resolve) => {
       const w = ucb1WorkerRef.current;
       if (!w) { resolve({ move: null, stats: null }); return; }
       const reqId = ++ucb1ReqIdRef.current;
       ucb1PendingRef.current.set(reqId, resolve);
-      w.postMessage({ type: 'choose', board, dice, player, budget, reqId });
+      w.postMessage({ type: 'choose', board, dice, player, timeBudgetMs, reqId });
     });
   }, []);
 
@@ -714,10 +713,18 @@ function App() {
   useEffect(() => {
     if (phase !== 'ai-thinking') return;
     let cancelled = false;
-    aiTimer.current = setTimeout(async () => {
+    (async () => {
       try {
-        const { move } = await askUcb1(board, dice, 'O', /* budget */ 2000);
+        const { move, stats } = await askUcb1(board, dice, 'O', /* timeBudgetMs */ 1000);
         if (cancelled) return;
+        if (stats) {
+          const rate = stats.time_ms > 0
+            ? Math.round(stats.rollouts / stats.time_ms * 1000)
+            : 0;
+          console.log(
+            `UCB1: ${stats.rollouts.toLocaleString()} rollouts in `
+            + `${stats.time_ms.toFixed(1)}ms (${rate.toLocaleString()}/s)`);
+        }
         // The worker returns {sub, cell}; reconstruct the GUI's full
         // move record (with `kind`) by looking it up in legalMoves.
         const legal = S3.legalMoves(board, dice, 'O');
@@ -731,8 +738,8 @@ function App() {
         const fallback = S3.chooseAIMove(board, dice, 'O');
         if (!cancelled && fallback) playMove(fallback, 'O');
       }
-    }, 750);
-    return () => { cancelled = true; clearTimeout(aiTimer.current); };
+    })();
+    return () => { cancelled = true; };
   }, [phase, board, dice, playMove, askUcb1]);
 
   const handleCellClick = (subIdx, cellIdx) => {
