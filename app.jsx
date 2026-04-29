@@ -147,19 +147,14 @@ function Mark({ value }) {
 }
 
 // ─── Cell ──────────────────────────────────────────────────────────────────
-// `isLegal` controls the highlight (used on both turns so the AI's
-// candidate moves are visible). `clickable` is the actionable subset —
-// set only on the human's turn. `isLastMove` (with `lastMoveColor`)
-// flags the cell where the previous move landed — covers placements
-// (cell now has a mark) and removes (cell now empty) alike. Last-move
-// takes visual priority over the legal-cell ring on the rare overlap
-// (e.g. snake-eyes where the just-played cell is also a legal target).
-function Cell({ value, isLegal, isLastMove, lastMoveColor, clickable, onClick, removeMode }) {
-  const ringShadow = isLastMove
-    ? `inset 0 0 0 2.5px ${lastMoveColor}`
-    : isLegal
-    ? `inset 0 0 0 1.5px ${THEME.text}`
-    : 'none';
+// `isLegal` controls the thin-ring legal-target highlight (used on
+// both turns so the AI's candidate moves are visible). `clickable`
+// is the actionable subset — set only on the human's turn.
+// `isLastMove` draws a dashed black circle around the cell where
+// the previous move landed (placement or remove). Circular shape
+// distinguishes it from the rectangular legal-cell ring; dashed
+// stroke distinguishes it from any solid ring we might add later.
+function Cell({ value, isLegal, isLastMove, clickable, onClick, removeMode }) {
   return (
     <button
       onClick={onClick}
@@ -168,7 +163,10 @@ function Cell({ value, isLegal, isLastMove, lastMoveColor, clickable, onClick, r
         position: 'relative',
         appearance: 'none', border: 'none', padding: 0, margin: 0,
         background: 'transparent',
-        boxShadow: ringShadow,
+        // overflow: hidden keeps the halo's blur from bleeding past
+        // this cell's border into neighbours.
+        overflow: 'hidden',
+        boxShadow: isLegal ? `inset 0 0 0 1.5px ${THEME.text}` : 'none',
         cursor: clickable ? 'pointer' : 'default',
         borderRadius: 4,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -177,6 +175,17 @@ function Cell({ value, isLegal, isLastMove, lastMoveColor, clickable, onClick, r
         WebkitTapHighlightColor: 'transparent',
       }}
     >
+      {isLastMove && (
+        <svg width="100%" height="100%" viewBox="0 0 100 100"
+             style={{
+               position: 'absolute', inset: 0, pointerEvents: 'none',
+               animation: 'last-move-fade 1.5s ease-out forwards',
+             }}>
+          <circle cx="50" cy="50" r="40"
+                  fill="none" stroke={THEME.text} strokeWidth="3"
+                  strokeDasharray="6 5" />
+        </svg>
+      )}
       <Mark value={value} />
       {removeMode && value && isLegal && (
         <span style={{
@@ -192,7 +201,7 @@ function Cell({ value, isLegal, isLastMove, lastMoveColor, clickable, onClick, r
 
 // ─── Sub-board ─────────────────────────────────────────────────────────────
 function SubBoard({ index, sub, legalCells, clickable, onCellClick, removeMode,
-                    justClaimedAt, claimSeq, lastMoveCell, lastMoveColor }) {
+                    justClaimedAt, claimSeq, lastMoveCell }) {
   const isClaimed = !!sub.owner;
   const showBigGlyph = sub.owner === 'X' || sub.owner === 'O';
   const bigColor = sub.owner === 'X' ? THEME.x : sub.owner === 'O' ? THEME.o : THEME.textMuted;
@@ -232,7 +241,6 @@ function SubBoard({ index, sub, legalCells, clickable, onCellClick, removeMode,
                 value={v}
                 isLegal={legal}
                 isLastMove={c === lastMoveCell}
-                lastMoveColor={lastMoveColor}
                 clickable={clickable && legal}
                 onClick={() => onCellClick(index, c)}
                 removeMode={removeMode}
@@ -293,9 +301,6 @@ function SubBoard({ index, sub, legalCells, clickable, onCellClick, removeMode,
 // ─── Board ─────────────────────────────────────────────────────────────────
 function Board({ board, legalMap, clickable, onCellClick, removeMode,
                  justClaimedAt, claimSeq, lastMove }) {
-  const lastMoveColor = lastMove
-    ? (lastMove.player === 'X' ? THEME.x : THEME.o)
-    : null;
   return (
     <div style={{
       width: '100%',
@@ -317,7 +322,6 @@ function Board({ board, legalMap, clickable, onCellClick, removeMode,
           justClaimedAt={justClaimedAt}
           claimSeq={claimSeq}
           lastMoveCell={lastMove && lastMove.sub === i ? lastMove.cell : null}
-          lastMoveColor={lastMoveColor}
         />
       ))}
     </div>
@@ -784,6 +788,12 @@ function App() {
   // the AI useEffect (which reads the live `difficulty`) decide
   // whether to take the turn for O.
   const startTurn = useCallback((player, currentBoard) => {
+    // The last-move halo marks "what your opponent just did". When the
+    // same player is about to move again — because the other side
+    // skipped on a no-legal-moves roll — the halo is from this very
+    // player and should clear, otherwise it bleeds into the new turn
+    // and looks like the opponent just played there.
+    setLastMove(prev => (prev && prev.player === player) ? null : prev);
     setCurrentPlayer(player);
     setRolling(true);
     setPhase('rolling');
