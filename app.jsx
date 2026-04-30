@@ -396,6 +396,16 @@ function RulesOverlay({ onClose }) {
           <li><b>12</b> (boxcars) — Place a mark on any empty cell of any undecided sub-board.</li>
         </ul>
 
+        <p style={{ margin: '0 0 14px' }}>
+          <b>Centre cells are special.</b> The centre of any sub-board is
+          the <i>7</i> position. A centre cell can only be played when you
+          roll a <b>7</b> — that roll opens up every centre, plus all the
+          other cells of the centre sub-board. On any other roll (3–6,
+          8–11, or boxcars) centre cells are off-limits for placement.
+          Snake eyes can still <i>remove</i> an opponent's mark from a
+          centre.
+        </p>
+
         <p style={{ margin: '0 0 18px', color: THEME.textMuted }}>
           If the dice leave you no legal action, your turn is skipped.
         </p>

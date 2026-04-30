@@ -211,8 +211,11 @@ function rollout(s) {
       }
     } else if (sum >= 1 && sum <= 9) {
       const p = sum - 1;
+      // Centre cell (idx 4) is reserved for the unique p == 4 roll.
+      // Mask it out of option (a)'s empty bitmap when p != 4.
       if (!(s.decided & (1 << p))) {
-        const empty = (~(s.cellsX[p] | s.cellsO[p])) & FULL;
+        let empty = (~(s.cellsX[p] | s.cellsO[p])) & FULL;
+        if (p !== 4) empty &= ~(1 << 4);
         for (let c = 0; c < 9; c++) {
           if (empty & (1 << c)) {
             _legalSub[n]  = p;
@@ -231,10 +234,11 @@ function rollout(s) {
           n++;
         }
       }
-    } else {  // sum === 10
+    } else {  // sum === 10: any empty NON-CENTRE cell, any undecided sub-board.
+      const NON_CENTRE = FULL & ~(1 << 4);
       for (let sb = 0; sb < 9; sb++) {
         if (s.decided & (1 << sb)) continue;
-        const empty = (~(s.cellsX[sb] | s.cellsO[sb])) & FULL;
+        const empty = (~(s.cellsX[sb] | s.cellsO[sb])) & NON_CENTRE;
         for (let c = 0; c < 9; c++) {
           if (empty & (1 << c)) {
             _legalSub[n]  = sb;
@@ -326,8 +330,11 @@ function legalMovesAtRoot(s, sum) {
     }
   } else if (sum >= 1 && sum <= 9) {
     const p = sum - 1;
+    // Same centre-cell rule as in rollout(): cell 4 is only legal in
+    // option (a) when p == 4.
     if (!(s.decided & (1 << p))) {
-      const empty = (~(s.cellsX[p] | s.cellsO[p])) & FULL;
+      let empty = (~(s.cellsX[p] | s.cellsO[p])) & FULL;
+      if (p !== 4) empty &= ~(1 << 4);
       for (let c = 0; c < 9; c++) {
         if (empty & (1 << c)) moves.push({ sub: p, cell: c });
       }
@@ -340,10 +347,11 @@ function legalMovesAtRoot(s, sum) {
         moves.push({ sub: sb, cell: p });
       }
     }
-  } else {
+  } else {  // sum === 10: any empty NON-CENTRE cell.
+    const NON_CENTRE = FULL & ~(1 << 4);
     for (let sb = 0; sb < 9; sb++) {
       if (s.decided & (1 << sb)) continue;
-      const empty = (~(s.cellsX[sb] | s.cellsO[sb])) & FULL;
+      const empty = (~(s.cellsX[sb] | s.cellsO[sb])) & NON_CENTRE;
       for (let c = 0; c < 9; c++) {
         if (empty & (1 << c)) moves.push({ sub: sb, cell: c });
       }

@@ -50,6 +50,12 @@ function diceMode(sum) {
 
 // Compute the set of legal moves.
 // Returns array of { sub, cell, kind: 'place'|'remove' }.
+//
+// Center-cell rule: cell index 4 (the centre, labelled 7) is reserved
+// for the unique roll whose meta-position is the centre, i.e. sum == 7
+// (t = sum-3 = 4). On every other roll — including boxcars wild — placing
+// on a centre cell is illegal. Removing an opponent mark from a centre
+// on snake-eyes is still allowed; the restriction is on placement only.
 function legalMoves(board, dice, currentPlayer) {
   const sum = dice[0] + dice[1];
   const mode = diceMode(sum);
@@ -72,10 +78,12 @@ function legalMoves(board, dice, currentPlayer) {
   }
 
   if (mode === 'wild') {
+    // Boxcars: any empty NON-CENTRE cell, any unclaimed sub-board.
     for (let s = 0; s < 9; s++) {
       const sb = board.sub[s];
       if (sb.owner) continue;
       for (let c = 0; c < 9; c++) {
+        if (c === 4) continue;
         if (sb.cells[c] === null) {
           moves.push({ sub: s, cell: c, kind: 'place' });
         }
@@ -86,15 +94,19 @@ function legalMoves(board, dice, currentPlayer) {
 
   // place: target meta-position = sum - 3 (sums 3..11 → indices 0..8)
   const t = sum - 3;
-  // Option A: any empty cell in sub-board t (if not claimed)
+  // Option A: any empty cell in sub-board t (if not claimed). The centre
+  // (cell 4) only counts when t itself is 4 (sum == 7).
   if (!board.sub[t].owner) {
     for (let c = 0; c < 9; c++) {
+      if (c === 4 && t !== 4) continue;
       if (board.sub[t].cells[c] === null) {
         moves.push({ sub: t, cell: c, kind: 'place' });
       }
     }
   }
-  // Option B: cell t in any sub-board (that isn't claimed)
+  // Option B: cell t in any sub-board (that isn't claimed). When t == 4
+  // this is the centre of every other sub-board — the unique window in
+  // which centres are reachable.
   for (let s = 0; s < 9; s++) {
     if (s === t && !board.sub[t].owner) continue; // already covered above
     const sb = board.sub[s];
