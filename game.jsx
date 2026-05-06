@@ -51,11 +51,13 @@ function diceMode(sum) {
 // Compute the set of legal moves.
 // Returns array of { sub, cell, kind: 'place'|'remove' }.
 //
-// Center-cell rule: cell index 4 (the centre, labelled 7) is reserved
-// for the unique roll whose meta-position is the centre, i.e. sum == 7
-// (t = sum-3 = 4). On every other roll — including boxcars wild — placing
-// on a centre cell is illegal. Removing an opponent mark from a centre
-// on snake-eyes is still allowed; the restriction is on placement only.
+// Center-cell rule: cell index 4 (the centre, labelled 7) is normally
+// reserved for the unique roll whose meta-position is the centre, i.e.
+// sum == 7 (t = sum-3 = 4). The two exceptions are:
+//   - boxcars (sum == 12) — the wild explicitly says "any hole, including
+//     any centre hole".
+//   - snake-eyes (sum == 2) — removing an opponent mark from a centre
+//     is allowed; the placement restriction does not apply to removes.
 function legalMoves(board, dice, currentPlayer) {
   const sum = dice[0] + dice[1];
   const mode = diceMode(sum);
@@ -78,12 +80,11 @@ function legalMoves(board, dice, currentPlayer) {
   }
 
   if (mode === 'wild') {
-    // Boxcars: any empty NON-CENTRE cell, any unclaimed sub-board.
+    // Boxcars: any empty cell (centres included), any unclaimed sub-board.
     for (let s = 0; s < 9; s++) {
       const sb = board.sub[s];
       if (sb.owner) continue;
       for (let c = 0; c < 9; c++) {
-        if (c === 4) continue;
         if (sb.cells[c] === null) {
           moves.push({ sub: s, cell: c, kind: 'place' });
         }

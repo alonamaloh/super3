@@ -234,11 +234,10 @@ function rollout(s) {
           n++;
         }
       }
-    } else {  // sum === 10: any empty NON-CENTRE cell, any undecided sub-board.
-      const NON_CENTRE = FULL & ~(1 << 4);
+    } else {  // sum === 10 (boxcars): any empty cell, any undecided sub-board.
       for (let sb = 0; sb < 9; sb++) {
         if (s.decided & (1 << sb)) continue;
-        const empty = (~(s.cellsX[sb] | s.cellsO[sb])) & NON_CENTRE;
+        const empty = (~(s.cellsX[sb] | s.cellsO[sb])) & FULL;
         for (let c = 0; c < 9; c++) {
           if (empty & (1 << c)) {
             _legalSub[n]  = sb;
@@ -347,11 +346,10 @@ function legalMovesAtRoot(s, sum) {
         moves.push({ sub: sb, cell: p });
       }
     }
-  } else {  // sum === 10: any empty NON-CENTRE cell.
-    const NON_CENTRE = FULL & ~(1 << 4);
+  } else {  // sum === 10 (boxcars): any empty cell, including centres.
     for (let sb = 0; sb < 9; sb++) {
       if (s.decided & (1 << sb)) continue;
-      const empty = (~(s.cellsX[sb] | s.cellsO[sb])) & NON_CENTRE;
+      const empty = (~(s.cellsX[sb] | s.cellsO[sb])) & FULL;
       for (let c = 0; c < 9; c++) {
         if (empty & (1 << c)) moves.push({ sub: sb, cell: c });
       }
